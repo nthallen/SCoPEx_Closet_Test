@@ -11,8 +11,6 @@
 %     Motor Vel         in RPM,            Default 0 RPM
 %     + Vel Accel       in RPM/sec,        Default 60RPM/sec
 %     + Vel Decel       in RPM/sec,        Default 60RPM/sec
-%     Vel Loop Ki       integration gain   Default 1.5e-5
-%     Vel Loop Kp       proportional gain  Default 1.0e-4
 %
 % Process - 
 %   1) Set Velocity Parameters
@@ -34,33 +32,39 @@
 %   wait until the Dwell to stop time has expired
 %   stop collecting data
 %   Disable the bridge
-%   Ask for next parameter settings
 
 close all
 
 %% **********************************************************************
 % Set test Parameters
-port     = 'COM2';     % Hard code the COM Port for now
+%
+mtr_port = 'COM10'; % COMM Port attached to motor driver
+vib_port = 'COM12'; % COMM Port attached to vibe sensor
 
-RPM_set  = 0020;       % Desired steady state motor RPM
-Acl_set  = 0020;       % RPM/sec
-Dcl_set  = 0020;       % RPM/sec
+RPM_set  = 140;     % (RPM Desired steady state motor
+Acl_set  = 400;     % (RPM/sec)
+Dcl_set  = 020;     % (RPM/sec)
 
-zer_time = 002;        % dwell time with bridge on at 0 RPM prior to step
-dwl_time = 020;        % dwell time at commanded RPM
-end_time = 010;        % dwell time after returning to 0 RPM post step
+zer_time = 002;     % dwell time with bridge on at 0RPM prior to step (sec)
+dwl_time = 010;     % dwell time at commanded RPM                     (sec)
+end_time = 010;     % dwell time after returning to 0 RPM post step   (sec)
 
+num_vars = 2;       % # of vars to read from drive
+F_sample = 40;      % Motor Driver Sampling Freq in                    (Hz)
+
+%% *********************************************************************
+% Calc various elapsed times and array size based on test parameters
+%
 acl_time = ceil(RPM_set/Acl_set*1.1);    % estimated acceleration time
 dcl_time = ceil(RPM_set/Dcl_set*1.1);    % estimated deceleration time
 
 stp_time = zer_time + acl_time + dwl_time;    % time to cmd back to 0 vel
 run_time = stp_time + dcl_time + end_time;    % total run time
 
-num_vars = 2;                                 %# of vars to read from drive
-F_sample = 25;                                % Sampling Freq in Hz (1/sec)
 num_start= round(zer_time*F_sample/num_vars); %# of samples to issue x RPM
 num_stop = round(stp_time*F_sample/num_vars); %# of samples to issue 0 RPM
 num_tot  = round(run_time*F_sample/num_vars); %# of samples to end acquire
+
 rate     = robotics.Rate(F_sample);           % for setting a fixed rate
 rate.OverrunAction = 'drop';
 
@@ -75,10 +79,10 @@ cts_per_rev = lin_per_rev*4;    % Quadrature (A, B, Index)     (counts/rev)
 
 % RPM related
 Drv_Freq    = 20e3;             % Driver Switching Frequency        (1/sec)
-RPM_FS      = 2^17;             % Driver's Maximum RPM reading     (counts)
+RPM_FS      = 2^17;             % Driver's Maximum RPM reading   (unitless)
 RPM_scale   = (RPM_FS/Drv_Freq)*(cts_per_rev/60);     %        (counts/RPM)
 
-Acl_FS      = 2^34;                                   %            (counts)
+Acl_FS      = 2^34;                                   %          (unitless)
 Acl_scale   = (Acl_FS/(Drv_Freq^2))*(cts_per_rev/60); %    (counts/RPM/sec)
 
 % Current related
@@ -139,47 +143,75 @@ payload   = gen_pay(pay_siz, Dcl_hex);% generate payload
 cmd_dcl_h = [cmd_wr_dcl_h, payload];  % concatenate command with payload
 cmd_dcl_d = cnvrt_cmd(cmd_dcl_h);     % convert to binary for fwrite
 
+%% *********************************************************************
+% Open the COM ports, s1 for talking to the Motor Driver
+%                     s2 for talking to the acelerometer
+% Get the steady state acelerometer offsets for zeroing out
+
+close_sx;    % Find all open COM ports and close them
+
+s1 = serial(mtr_port,'BaudRate',115200,'InputBufferSize',3000);
+s2 = serial(vib_port,'BaudRate',115200,'InputBufferSize',3000, ...
+                     'Timeout',0.1,    'Terminator',"CR/LF");
+fopen(s1);   % Motor Driver COM Port
+fopen(s2);   % Vibe Sensor  COM Port
+
+acel_offset = 50;                        % # samples to average
+acel_off = zeros(acel_offset,4);
+tic
+for ii = 1:acel_offset
+    acel_off(ii,:) = get_acel_line(s2);  % get accelerometer readings
+end
+a_off=mean(acel_off);
+a_off_std = std(acel_off);
+
+
 %% **********************************************************************
 % Execute the Selected Velocity Pulse Sequence
 %
-close_sx;    % Find all open COM ports and close them
-
-s1 = serial(port,'BaudRate',115200,'InputBufferSize',3000);
-fopen(s1);
 fwrite(s1, cmd_wr_access_d);      % enable register modification
 fread(s1, 8);                     % read back response
 
 fwrite(s1, cmd_wr_vel_0_d);       % set velocity to zero
 fread(s1, 8);      
 
-fwrite(s1, cmd_acl_d);             % set acelleration pos. pos.
+fwrite(s1, cmd_acl_d);            % set acelleration pos. pos.
 fread(s1, 8);
 
-fwrite(s1, cmd_dcl_d);             % set decelleration pos. pos.
+fwrite(s1, cmd_dcl_d);            % set decelleration pos. pos.
 fread(s1, 8);
 
 fwrite(s1, cmd_wr_brdg_on_d);     % enable bridge
 fread(s1, 8);
 pause(1)
 
-%v_plot = animatedline('Color',[0 .7 .7]);       % for plotting velocity
-%i_plot = animatedline('Color',[0 .5 .5]);       % for plotting current
-%tot_x  = acl_time + dwl_time + dcl_time;        % duration of data acq
+blk         = 1;                  % starting block to animate
+num_pnts    = 0;                  % # of points per block
+data_record = zeros(num_tot,3);   % initialize recording buffer
+acel_data   = zeros(num_tot,4);
 
-blk         = 1;                                % starting block to animate
-num_pnts    = 0;                                % # of points per block
-data_record = zeros(num_tot,3);                 % init recording buffer
-
+run_time=run_time*1.2;
+subplot(2,1,1)
 yyaxis left
 plot(data_record(:,1), data_record(:,2))
 ylabel('Motor Speed (RPM)'), xlabel('Time (sec)');
-xlim([0 run_time]), ylim([0 RPM_set*1.2]);      % Optimizing plot time
+xlim([0 run_time]), ylim([-RPM_set*0.2 RPM_set*1.2]); % Optimize plot time
 yyaxis right
 plot(data_record(:,1), data_record(:,3))
 ylabel('Motor Current (Amp)');
-xlim([0 run_time]), ylim([0 0.7]);              % Optimizing plot time
+xlim([0 run_time]),                                
 
-% Here we go !!!!           
+a_max = 2.5;
+subplot(2,1,2)
+plot(acel_data(:,4), acel_data(:,1)-a_off(1), '-r', ...
+     acel_data(:,4), acel_data(:,2)-a_off(2), '-g', ...
+     acel_data(:,4), acel_data(:,3)-a_off(3), '-b')
+xlabel('Time (sec)'), ylabel('Acceleration in m/sec^2)');
+legend('X', 'Y', 'Z'), grid('on');
+xlim([0 run_time]), ylim([-a_max a_max]); 
+
+% Here we go !!!!    
+zz = 1;                       % index for acceleration data
 tic                           % get data record start time
 for ii=1:num_tot              % start data acquisiton
   fwrite(s1, cmd_rd_vel_d);   % request velocity
@@ -191,7 +223,7 @@ for ii=1:num_tot              % start data acquisiton
   else
       data_record(ii,2)=(vel(12)*2^24+vel(11)*2^16+vel(10)*2^8+vel(9))/RPM_scale;
   end
-  waitfor(rate);               % wait for sample period
+  waitfor(rate);                        % wait for driver sample period
   
   fwrite(s1, cmd_rd_Ims_d);    % request current
   cur = fread(s1, 12);         % read    current
@@ -203,7 +235,9 @@ for ii=1:num_tot              % start data acquisiton
       data_record(ii,3)=(cur(10)*2^8+cur(9))*Cur_scale;
   end
   data_record(ii,1) = toc;     % save time stamp for vel and current
-  waitfor(rate);               % wait for sample period
+  
+  acel_data(ii,:) = get_acel_line(s2);  % get accelerometer readings
+  waitfor(rate);     % wait for sample period
   
   if(num_start == ii)          % dwell time at 0 RPM period expired?
     fwrite(s1, cmd_vel_d);     % set the velocity
@@ -217,40 +251,47 @@ for ii=1:num_tot              % start data acquisiton
   
   num_pnts = num_pnts+1;       % points collected since last animation
   if(num_pnts == F_sample)     % update display once per second
-    %{
-    addpoints(v_plot, data_record(blk:blk+F_sample-1,1), ...
-                      data_record(blk:blk+F_sample-1,2))
-    drawnow
-    addpoints(i_plot, data_record(blk:blk+F_sample-1,1), ...
-                      data_record(blk:blk+F_sample-1,3))
-    drawnow
-    %}
+    subplot(2,1,1)
     yyaxis left
     plot(data_record(:,1), data_record(:,2))
     ylabel('Motor Speed (RPM)'), xlabel('Time (sec)');
+    xlim([0 run_time]);
     yyaxis right
     plot(data_record(:,1), data_record(:,3))
     ylabel('Motor Current (Amp)');
-    
+    xlim([0 run_time]);
+    grid on
+ %   title({'Preliminary Velocity Loop Tuning Result';...
+ %          'Step Response to a 0 - 250 RPM Step, 20RPM/sec acel/decel limits'; ...
+ %          'Unfiltered Data, Sample rate 12.5Hz, 80msec'}) 
     blk = blk+F_sample;        % point to next block
     num_pnts = 0;
   end
+  
+  if(mod(zz, F_sample+1) == 0)
+    subplot(2,1,2)
+    plot(acel_data(:,4), acel_data(:,1)-a_off(1), '-r', ...
+         acel_data(:,4), acel_data(:,2)-a_off(2), '-g', ...
+         acel_data(:,4), acel_data(:,3)-a_off(3), '-b')
+    xlabel('Time (sec)'), ylabel('Acceleration in m/sec^2)');
+    legend('X', 'Y', 'Z'), grid('on'); 
+    xlim([0 run_time]), ylim([-a_max a_max]); 
+  end
 end
-grid on
-title({'Preliminary Velocity Loop Tuning Result';...
-       'Step Response to a 0 - 250 RPM Step, 20RPM/sec acel/decel limits'; ...
-      'Unfiltered Data, Sample rate 12.5Hz, 80msec'}) 
 
 fwrite(s1, cmd_wr_brdg_off_d);    % turn off bridge
 fread(s1, 8);
 fclose(s1);
+fclose(s2);
 
 %% ******************************************************************** 
 % Generate a lowpass (~0.5 Hz) lowpass filtered version of
 % velocity and current vs. time
+%
 RPM_flt = smooth(data_record(:,2),5);
 AMP_flt = smooth(data_record(:,3),5);
-figure,
+
+figure, subplot(2,1,1)
 yyaxis left
 plot(data_record(:,1), RPM_flt)
 ylabel('Motor Speed (RPM)'), xlabel('Time (sec)');
@@ -260,18 +301,21 @@ plot(data_record(:,1), AMP_flt)
 ylabel('Motor Current (Amp)');
 xlim([0 run_time])
 grid on
-title('Low Pass Filtered (~0.5 Hz) 0 - 20 RPM step response')
+title(['Low Pass Filtered (~0.5 Hz) 0 - ', num2str(RPM_set), ...
+       ' RPM step response'])
+subplot(2,1,2)
+plot(acel_data(:,4), acel_data(:,1)-a_off(1), '-r', ...
+     acel_data(:,4), acel_data(:,2)-a_off(2), '-g', ...
+     acel_data(:,4), acel_data(:,3)-a_off(3), '-b')
+xlabel('Time (sec)'), ylabel('Acceleration in m/sec^2)');
+legend('X', 'Y', 'Z'), grid('on'); 
+xlim([0 run_time]), ylim([-a_max a_max]); 
+title('Unfiltered vibrations during step')
 
 %% **********************************************************************
 % Get some stats from record and 
 % generate the Vel and Current vs. time
 %
-% Sample time consistency Stats
-dtime = diff(data_record(:,1));              % time between samples
-ntime = std(dtime);                          % noise in the sample time
-mtime = median(dtime);                       % median sample time
-figure,plot(dtime);
-
 % Velocity consistency during dwell period
 v_strt = round((zer_time+acl_time)*F_sample*1.1/num_vars);
 v_stop = round(stp_time*F_sample*0.9/num_vars);
@@ -282,22 +326,34 @@ SNRvel = 20*log10(mvel/nvel);                 % SNR velocity in db
 % Current consistency during dwell period
 ncur   =  std(data_record(v_strt:v_stop,3));  % noise in the velocity
 mcur   = mean(data_record(v_strt:v_stop,3));  % average velocity
-SNRcuur = 20*log10(mcur/ncur);                 % SNR velocity in db
+SNRcuur = 20*log10(mcur/ncur);                % SNR velocity in db
 
-% Generate Plot
-%{
-figure, 
-yyaxis left
-plot(data_record(:,1), data_record(:,2))
-ylabel('Motor Speed (RPM)'), xlabel('Time (sec)');
-yyaxis right
-plot(data_record(:,1), data_record(:,3))
-ylabel('Motor Current (Amp)');
-%}
+% Current peak during acel
+cur_max = max(AMP_flt);
+cur_idx = find(AMP_flt == cur_max,1);
+width = 2;
+cur_max_ave = mean(AMP_flt(cur_idx-width:cur_idx+width));
 
-hw=instrfind;
+% aceleration rms values during steady state
+xrms   = sqrt(mean((acel_data(v_strt:v_stop,1)-a_off(1)).^2));
+yrms   = sqrt(mean((acel_data(v_strt:v_stop,2)-a_off(2)).^2));
+zrms   = sqrt(mean((acel_data(v_strt:v_stop,3)-a_off(3)).^2));
 
+% Sample time consistency Stats
+dtime = diff(data_record(:,1));              % time between samples
+ntime = std(dtime);                          % noise in the sample time
+mtime = median(dtime);                       % median sample time
 
+filename=[num2str(RPM_set),'_',num2str(Acl_set),'_stats'];
+save(filename,'cur_max_ave','mcur',  'ncur',  ...
+                            'mvel',  'nvel',  ...
+                            'mtime', 'ntime', ...
+                    'xrms', 'yrms',  'zrms');
+filename=[num2str(RPM_set),'_',num2str(Acl_set),'_profiles'];
+save(filename,'acel_data','data_record');
+savefig(filename)
+
+figure,plot(dtime);
 
 %% ************************************************************************
 %
@@ -341,4 +397,22 @@ function payload = gen_pay(num_nibbs, data_in)
       crc = ['0',crc];
   end
   payload = [payload, crc];           % append CRC to little Endian Pay
+end
+
+function dummy = get_acel_line(com_port)
+  for ii=1:3
+    data = fgetl(com_port);
+    if isempty(data)
+      fprintf(1, 'Empty Line!\n');
+    elseif data(1) == 'X'
+      dummy(1) = str2double(data(2:end));
+    elseif data(1) == 'Y'
+      dummy(2) = str2double(data(2:end));
+    elseif data(1) == 'Z'
+      dummy(3) = str2double(data(2:end));
+    else
+      fprintf(1, 'Accelrometer Vibration Data test ICM20948\n');
+    end
+  end
+  dummy(4) = toc; 
 end
