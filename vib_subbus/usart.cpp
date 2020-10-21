@@ -7,7 +7,7 @@
 static uint8_t UART_rx_buffer[UART_RX_BUFFER_SIZE];
 
 /*! Buffer to accumulate output before sending */
-static uint8_t UART_tx_buffer[UART_TX_BUFFER_SIZE];
+static uint8_t UART_tx_buffer[UART_TX_BUFFER_SIZE+1];
  /*! The number of characters in the tx buffer */
 static int nc_tx, cp_tx;
 
@@ -51,7 +51,7 @@ void uart_flush_output(void) {
     UART_tx_busy = 1;
     int av = Serial.availableForWrite();
     if (av > 0) {
-      if (nc < av) nc = av;
+      if (nc > av) nc = av;
       int nc1 = Serial.write(&UART_tx_buffer[cp_tx], nc);
       cp_tx += nc1;
       if (cp_tx >= nc_tx) {
