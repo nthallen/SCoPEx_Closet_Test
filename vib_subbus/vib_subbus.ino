@@ -1,6 +1,7 @@
 #include "subbus.h"
 #include "rtc_timer.h"
 #include "control.h"
+#include "vibration.h"
 
 /*
 const int ibufsize = 80;
@@ -12,11 +13,17 @@ uint32_t timeout;
 */
 
 void setup() {
+  Serial.begin(115200);
+  while (!Serial) {  // Wait for the Serial Monitor
+    delay(1);
+  }
+
   if (subbus_add_driver(&sb_base) ||
       subbus_add_driver(&sb_fail_sw) ||
       subbus_add_driver(&sb_board_desc) ||
       subbus_add_driver(&sb_control) ||
-      subbus_add_driver(&sb_rtc)
+      subbus_add_driver(&sb_rtc) ||
+      subbus_add_driver(&sb_vib)
       ) {
     Serial.println("Misconfigured subbus driver");
   }
