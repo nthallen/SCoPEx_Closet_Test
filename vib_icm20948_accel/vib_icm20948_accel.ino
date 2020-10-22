@@ -64,7 +64,8 @@ void setup(void)
   Serial.println("ICM20948 Test"); Serial.println("");
 
   /* Initialise the sensor */
-  if(!dpEng.begin(ICM20948_ACCELRANGE_4G, GYRO_RANGE_250DPS, ICM20948_ACCELLOWPASS_50_4_HZ))
+  // if(!dpEng.begin(ICM20948_ACCELRANGE_4G, GYRO_RANGE_250DPS, ICM20948_ACCELLOWPASS_50_4_HZ))
+  if(!dpEng.begin(ICM20948_ACCELRANGE_4G, GYRO_RANGE_250DPS, ICM20948_ACCELLOWPASS_473_0_HZ))
   {
     /* There was a problem detecting the ICM20948 ... check your connections */
     Serial.println("Ooops, no ICM20948/AK09916 detected ... Check your wiring!");
@@ -75,21 +76,40 @@ void setup(void)
   displaySensorDetails();
 }
 
+int32_t last_event_time = 0;
+int32_t n_dups = 0;
+float last_x = 0;
+float last_y = 0;
+float last_z = 0;
+
 void loop(void)
 {
-//  sensors_event_t aevent, gevent, mevent;
+  // sensors_event_t aevent, gevent, mevent;
   sensors_event_t aevent; //  Accel only
 
   /* Get a new sensor event */
-//  dpEng.getEvent(&aevent, &gevent, &mevent);
-  dpEng.getEvent(&aevent);  //  Accel only
+  // dpEng.getEvent(&aevent, &gevent, &mevent);
+  dpEng.getEventAcc(&aevent);  //  Accel only
 
+  if (aevent.acceleration.x == last_x &&
+      aevent.acceleration.y == last_y &&
+      aevent.acceleration.z == last_z) {
+    ++n_dups;
+  } else {
+    int32_t dT = aevent.timestamp - last_event_time;
+    last_event_time = aevent.timestamp;
+    Serial.print("dT:"); Serial.print(dT); Serial.print(" dups:"); Serial.println(n_dups);
+    n_dups = 0;
+    last_x = aevent.acceleration.x;
+    last_y = aevent.acceleration.y;
+    last_z = aevent.acceleration.z;
+  }
 
 //  Display the accel results (acceleration is measured in m/s^2)
 //  Serial.print("A ");
-  Serial.print("X"); Serial.print(aevent.acceleration.x, 4); Serial.println("");
-  Serial.print("Y"); Serial.print(aevent.acceleration.y, 4); Serial.println("");
-  Serial.print("Z"); Serial.print(aevent.acceleration.z, 4); Serial.println("");
+//  Serial.print("X"); Serial.print(aevent.acceleration.x, 4); Serial.println("");
+//  Serial.print("Y"); Serial.print(aevent.acceleration.y, 4); Serial.println("");
+//  Serial.print("Z"); Serial.print(aevent.acceleration.z, 4); Serial.println("");
 //  Serial.println("m/s^2");
 
   /* 
@@ -110,5 +130,5 @@ void loop(void)
 
 //  Serial.println("");
 
-  delay(50);
+//  delay(50);
 }
