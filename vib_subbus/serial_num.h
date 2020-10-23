@@ -16,7 +16,7 @@
 
 // These parameters are common to all boards built with this code
 #define SUBBUS_BOARD_FIRMWARE_REV "V1.0"
-#define SUBBUS_BOARD_BUILD_NUM 12
+#define SUBBUS_BOARD_BUILD_NUM 1
 #define HAVE_RTC
 #define SUBBUS_BOARD_SN 1
 #define SUBBUS_SUBFUNCTION 16

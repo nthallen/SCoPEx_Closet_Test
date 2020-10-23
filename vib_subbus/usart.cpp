@@ -47,7 +47,6 @@ void uart_send_char(int8_t c) {
 void uart_flush_output(void) {
   int nc = nc_tx - cp_tx;
   if (nc) {
-    assert(UART_tx_busy == 0);
     UART_tx_busy = 1;
     int av = Serial.availableForWrite();
     if (av > 0) {

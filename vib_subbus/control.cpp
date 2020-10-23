@@ -82,13 +82,13 @@ static void read_multi(uint8_t *cmd) {
   uint16_t result;
   ++cmd;
   if ( read_hex( &cmd, &count ) || count > 500 || *cmd != '#' ) {
-    SendErrorMsg("3");
+    SendErrorMsg("31");
     return;
   }
   ++cmd; // skip over the '#'
   for (;;) {
     if ( read_hex( &cmd, &addr ) ) {
-      SendErrorMsg("3");
+      SendErrorMsg("32");
       return;
     }
     if (*cmd == ':' ) {
@@ -97,7 +97,7 @@ static void read_multi(uint8_t *cmd) {
            *cmd++ != ':' ||
            read_hex( &cmd, &end) ||
            incr >= 0x8000 ) {
-        SendErrorMsg("3");
+        SendErrorMsg("33");
         return;
       }
       rep = count;
@@ -106,7 +106,7 @@ static void read_multi(uint8_t *cmd) {
       incr = 0;
       ++cmd;
       if ( rep > count || read_hex( &cmd, &addr ) ) {
-        SendErrorMsg("3");
+        SendErrorMsg("34");
         return;
       }
       end = addr;
@@ -127,19 +127,19 @@ static void read_multi(uint8_t *cmd) {
 #endif
       ++cmd;
       if ( read_hex( &cmd, &rep ) ) {
-        SendErrorMsg("3");
+        SendErrorMsg("35");
         return;
       }
       if (result < rep) {
         rep = result;
       }
       if (*cmd != '@') {
-        SendErrorMsg("3");
+        SendErrorMsg("36");
         return;
       }
       ++cmd;
       if (read_hex(&cmd, &addr)) {
-        SendErrorMsg("3");
+        SendErrorMsg("37");
         return;
       }
       incr = 0;
@@ -151,7 +151,7 @@ static void read_multi(uint8_t *cmd) {
     }
     for ( start = addr; addr >= start && addr <= end && rep > 0; addr += incr, --rep, --count ) {
       if ( count == 0 ) {
-        SendErrorMsg("3");
+        SendErrorMsg("38");
         return;
       }
 #if USE_SUBBUS
@@ -171,7 +171,7 @@ static void read_multi(uint8_t *cmd) {
       SendMsg("");
       return;
     } else if (*cmd++ != ',') {
-      SendErrorMsg("3");
+      SendErrorMsg("39");
       return;
     }
   }
@@ -206,18 +206,18 @@ static void parse_command(uint8_t *cmd) {
   cmd_code = *cmd++;
   if (nargs > 0) {
     if (read_hex(&cmd,&arg1)) {
-      SendErrorMsg("3");
+      SendErrorMsg("3A");
       return;
     }
     if (nargs > 1) {
       if (*cmd++ != ':' || read_hex(&cmd,&arg2)) {
-        SendErrorMsg("3");
+        SendErrorMsg("3B");
         return;
       }
     }
   }
   if (*cmd != '\n' && *cmd != '\r') {
-    SendErrorMsg("3");
+    SendErrorMsg("3C");
     return;
   }
   switch(cmd_code) {

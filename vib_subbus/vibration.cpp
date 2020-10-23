@@ -5,12 +5,12 @@
 DPEng_ICM20948 dpEng = DPEng_ICM20948(0x948A, 0x948B, 0x948C);
 
 static subbus_cache_word_t vib_cache[VIB_HIGH_ADDR-VIB_BASE_ADDR+1] = {
-  { 0, 0, true, false, true,  false, true  }, // cmd/status
-  { 0, 0, true, false, true,  false, true  }, // SampleDur
-  { 0, 0, true, false, true,  false, false }, // PreQueueDepth
-  { 0, 0, true, false, false, false, true  },  // QueueDepth
-  { 0, 0, true, false, false, false, true  },  // FIFO
-  { 0, 0, true, false, false, false, false }   // Tdelta
+  { 0, 0, true,  false, true,  false, true  }, // cmd/status
+  { 0, 0, true,  false, true,  false, true  }, // SampleDur
+  { 0, 0, true,  false, true,  false, true }, // PreQueueDepth
+  { 0, 0, true,  false, false, false, true  },  // QueueDepth
+  { 0, 0, false, false, false, false, true  },  // FIFO
+  { 0, 0, true,  false, false, false, false }   // Tdelta
 };
 
 static uint16_t vib_status = 0;
@@ -47,8 +47,8 @@ static void push_vib_sample(int16_t x, int16_t y, int16_t z, uint16_t dT) {
   last_z = R->z = z;
   R->dT = dT;
   if (fifo_head == fifo_tail) {
-    sb_cache_update(vib_cache, VIB_FIFO_OFFSET, last_x);
-    vib_cache[VIB_FIFODEPTH_OFFSET].readable = true;
+    vib_cache[VIB_FIFO_OFFSET].readable = true;
+    sb_cache_update(vib_cache, VIB_FIFO_OFFSET, x);
     fifo_tail_idx = 0;
   }
   if (++fifo_head == VIB_FIFO_SIZE)
@@ -63,8 +63,9 @@ static void push_vib_sample(int16_t x, int16_t y, int16_t z, uint16_t dT) {
 static void vib_reset_fifo() {
   fifo_head = fifo_tail = fifo_tail_idx = 0;
   fifo_depth = 0;
+  fifo_full = false;
   sb_cache_update(vib_cache, VIB_FIFODEPTH_OFFSET, 0);
-  vib_cache[VIB_FIFODEPTH_OFFSET].readable = false;
+  vib_cache[VIB_FIFO_OFFSET].readable = false;
 }
 
 static void vib_reset() {
@@ -87,7 +88,7 @@ static void vib_preset_fifo(uint16_t nrecs) {
     VIB_STAT_SENSOR_RDY|VIB_STAT_STATES,
     VIB_STAT_SENSOR_RDY|VIB_STAT_PRESET);
   for (int i = 0; i < nrecs; ++i) {
-    push_vib_sample(0, 0, 0, 0);
+    push_vib_sample(0,0,0,0);
   }
 }
 
@@ -105,7 +106,7 @@ static void vib_poll() {
         dpEng.accel_raw.z != last_z) {
       // This is a new sample
       if (rtc_current_count >= vib_next_sample) {
-        uint16_t dT = rtc_current_count - vib_next_sample;
+        uint16_t dT = (rtc_current_count - vib_next_sample)/10;
         push_vib_sample(dpEng.accel_raw.x, dpEng.accel_raw.y,
           dpEng.accel_raw.z, dT);
       }
@@ -140,7 +141,13 @@ static void vib_action(uint16_t offset) {
       break;
     case VIB_SAMPLE_DUR_OFFSET:
       if (sb_cache_iswritten(vib_cache, VIB_SAMPLE_DUR_OFFSET, &val)) {
-        vib_sample_dur = val * 100;
+        vib_sample_dur = val * (uint32_t)100;
+        sb_cache_update(vib_cache, VIB_SAMPLE_DUR_OFFSET, val);
+      }
+      break;
+    case VIB_PREQDEPTH_OFFSET:
+      if (sb_cache_iswritten(vib_cache, VIB_PREQDEPTH_OFFSET, &val)) {
+        sb_cache_update(vib_cache, VIB_PREQDEPTH_OFFSET, val);
       }
       break;
     case VIB_FIFODEPTH_OFFSET:
@@ -153,6 +160,8 @@ static void vib_action(uint16_t offset) {
     case VIB_FIFO_OFFSET:
       // update FIFO contents based on fifo_tail and fifo_tail_idx
       // if fifo is empty, then we should really make it unreadable
+      if (!fifo_full && fifo_head == fifo_tail)
+        break; // empty! do nothing shouldn't even be here!
       R = &vib_fifo[fifo_tail];
       switch (++fifo_tail_idx) {
         case 1: val = R->y; break;
@@ -165,7 +174,8 @@ static void vib_action(uint16_t offset) {
             fifo_tail = 0;
           --fifo_depth;
           if (fifo_tail == fifo_head) {
-            vib_cache[VIB_FIFODEPTH_OFFSET].readable = false;
+            // Now empty
+            vib_cache[VIB_FIFO_OFFSET].readable = false;
             val = 0;
           } else {
             val = vib_fifo[fifo_tail].x;

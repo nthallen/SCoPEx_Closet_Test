@@ -1,7 +1,10 @@
 function rm_obj = read_multi_prep(varargin)
   % rm_obj = read_multi_prep(addr [, addr ...]);
-  % addr can be a scalar for a single read, a [count addr] pair or
-  % an [addr incr addr] triple.
+  % addr can be:
+  %   a scalar for a single read
+  %   a [count addr] pair for multiple reads from a single addr
+  %   a [addr incr addr] triple for reading a range
+  %   a [cntaddr count fifoaddr 0] for reading a FIFO
 
   % build a command string
   N = length(varargin);
